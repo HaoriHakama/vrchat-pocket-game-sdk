@@ -23,10 +23,12 @@ namespace VrcPocketGame.Editor
         public static void ValidateAll()
         {
             var pools = UnityEngine.Object.FindObjectsOfType<PocketGameTerminalPool>(true);
-            var warningCount = PocketGameProgramAssetValidator.Validate(pools);
-            Require(pools.Length > 0, "No terminal pool in the scene.");
+            var locals = UnityEngine.Object.FindObjectsOfType<PocketGameLocalTerminal>(true);
+            var warningCount = PocketGameProgramAssetValidator.Validate(pools, locals);
+            Require(pools.Length + locals.Length > 0, "No terminal pool or local terminal in the scene.");
             foreach (var pool in pools) ValidateStructure(pool);
-            Debug.Log("[Pocket Game SDK] Structural validation PASS: " + pools.Length + " pool(s), " + warningCount + " warning(s).");
+            foreach (var local in locals) ValidateLocalStructure(local);
+            Debug.Log("[Pocket Game SDK] Structural validation PASS: " + pools.Length + " pool(s), " + locals.Length + " local terminal(s), " + warningCount + " warning(s).");
         }
 
         public static void Validate(PocketGameTerminalPool pool)
@@ -63,6 +65,49 @@ namespace VrcPocketGame.Editor
                 Require(session.ui != null, "Session needs the shared UI input gate.");
                 ValidateUi(root, session.ui);
             }
+        }
+
+        public static void ValidateLocal(PocketGameLocalTerminal local)
+        {
+            PocketGameProgramAssetValidator.Validate(new PocketGameTerminalPool[0], new[] { local });
+            ValidateLocalStructure(local);
+        }
+
+        private static void ValidateLocalStructure(PocketGameLocalTerminal local)
+        {
+            Require(local != null && local.terminalRoot != null, "Local controller needs one terminal root.");
+            var root = local.terminalRoot;
+            Require(local.gameObject.activeInHierarchy && !local.transform.IsChildOf(root.transform), "Local controller must stay active outside its stowed terminal.");
+            Require(!root.activeSelf, "Local terminal must be initially inactive.");
+            Require(root.GetComponent<Rigidbody>() != null && local.pickup != null && local.pickup.gameObject == root, "Local terminal needs a root Rigidbody and Pickup.");
+            Require(!local.pickup.pickupable && local.pickup.DisallowTheft, "Local Pickup must start guarded and disabled.");
+            Require(root.GetComponentsInChildren<VRCObjectSync>(true).Length == 0 && root.GetComponentsInChildren<VRCObjectPool>(true).Length == 0, "Local terminal must not contain network object sync or pools.");
+            Require(root.GetComponentsInChildren<PocketGameTerminalSession>(true).Length == 0, "Local terminal must not contain a pooled session.");
+            Require(local.gameEvents != null && local.gameEvents.transform.IsChildOf(root.transform), "Local game must be inside its terminal.");
+            Require(local.ui != null && local.ui.transform.IsChildOf(root.transform) && local.ui.localTerminal == local && local.ui.terminalSession == null && local.ui.scalableRoot == root.transform, "Local UI wiring is invalid.");
+            var relay = root.GetComponent<PocketGameInputRelay>();
+            Require(relay != null && relay.localTerminal == local && relay.terminalSession == null, "Local input relay is not wired.");
+            var program = local.gameEvents.programSource as UdonSharpProgramAsset;
+            Require(program != null && program.sourceCsScript != null, "Local game Udon program is missing.");
+            var gameType = program.sourceCsScript.GetClass();
+            foreach (var name in GameEvents) Require(HasEvent(gameType, name), "Local game lacks public void " + name + "().");
+            var game = UdonSharpEditorUtility.GetProxyBehaviour(local.gameEvents) as PocketGameBehaviour;
+            if (game != null) Require(game.localTerminal == local && game.terminalSession == null, "Local game base is not wired.");
+            // 同期フィールドを持つ既存ゲームはそのまま流用しない。別クライアントの値の受信を構造段階で防ぐ。
+            foreach (var behaviour in root.GetComponentsInChildren<UdonBehaviour>(true))
+            {
+                var asset = behaviour.programSource as UdonSharpProgramAsset;
+                if (asset != null)
+                {
+                    var type = asset.sourceCsScript == null ? null : asset.sourceCsScript.GetClass();
+                    var mode = type == null ? null : Attribute.GetCustomAttribute(type, typeof(UdonBehaviourSyncModeAttribute), true) as UdonBehaviourSyncModeAttribute;
+                    Require(mode != null && mode.behaviourSyncMode == BehaviourSyncMode.None, "Local terminal behaviours must declare BehaviourSyncMode.None: " + behaviour.name);
+                }
+                else Require(behaviour.SyncMethod == VRC.SDKBase.Networking.SyncType.None, "Local graph behaviours must use SyncType.None: " + behaviour.name);
+            }
+            foreach (var other in UnityEngine.Object.FindObjectsOfType<PocketGameLocalTerminal>(true))
+                Require(other == local || other.terminalRoot != root, "Local controllers must not share a terminal.");
+            ValidateUi(root, local.ui);
         }
 
         private static void ValidateUi(GameObject root, PocketGameUi ui)

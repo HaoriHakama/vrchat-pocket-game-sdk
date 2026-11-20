@@ -51,6 +51,7 @@ namespace VrcPocketGame.Editor
         public GameObject Root;
         public Transform GameStateSlot;
         public PocketGameTerminalSession Session;
+        public PocketGameLocalTerminal LocalTerminal;
         public PocketGameUi Ui;
         public Canvas MainCanvas;
         public RectTransform HeaderSlot;
@@ -75,6 +76,7 @@ namespace VrcPocketGame.Editor
             try
             {
                 EnsureProgram(typeof(PocketGameTerminalPool), createdPaths);
+                EnsureProgram(typeof(PocketGameLocalTerminal), createdPaths);
                 EnsureProgram(typeof(PocketGameTerminalSession), createdPaths);
                 EnsureProgram(typeof(PocketGameInputRelay), createdPaths);
                 EnsureProgram(typeof(PocketGameUi), createdPaths);
@@ -135,6 +137,19 @@ namespace VrcPocketGame.Editor
         public static PocketGameTerminalParts Create(Transform parent, string name, PocketGameTerminalPool pool,
             int slot, PocketGameTheme theme, PocketGameTerminalProfile profile)
         {
+            return CreateInternal(parent, name, pool, slot, null, theme, profile);
+        }
+
+        public static PocketGameTerminalParts CreateLocal(Transform parent, string name, PocketGameLocalTerminal localTerminal,
+            PocketGameTheme theme, PocketGameTerminalProfile profile)
+        {
+            if (localTerminal == null) throw new ArgumentNullException(nameof(localTerminal));
+            return CreateInternal(parent, name, null, 0, localTerminal, theme, profile);
+        }
+
+        private static PocketGameTerminalParts CreateInternal(Transform parent, string name, PocketGameTerminalPool pool,
+            int slot, PocketGameLocalTerminal localTerminal, PocketGameTheme theme, PocketGameTerminalProfile profile)
+        {
             profile = profile ?? new PocketGameTerminalProfile();
             var screenSize = profile.ScreenSize;
             var externalSize = profile.ExternalCanvasSize ?? new Vector2(300, screenSize.y);
@@ -159,8 +174,12 @@ namespace VrcPocketGame.Editor
             grip.size = profile.GripSize;
             grip.center = profile.GripCenter ?? new Vector3(profile.ScreenOffset.x,
                 profile.ScreenOffset.y - screenSize.y * profile.ScreenPixelScale / 2 - .04f, 0);
-            var sync = parts.Root.AddComponent<VRCObjectSync>();
-            sync.AllowCollisionOwnershipTransfer = false;
+            // ローカル方式はTransformを同期せず、所有権移動を利用権限に使わない。
+            if (localTerminal == null)
+            {
+                var sync = parts.Root.AddComponent<VRCObjectSync>();
+                sync.AllowCollisionOwnershipTransfer = false;
+            }
             var pickup = parts.Root.AddComponent<VRCPickup>();
             pickup.DisallowTheft = true;
             pickup.pickupable = false;
@@ -169,12 +188,22 @@ namespace VrcPocketGame.Editor
             if (profile.PickupAutoHold.HasValue) pickup.AutoHold = profile.PickupAutoHold.Value;
             var sessionRoot = new GameObject("Terminal session");
             sessionRoot.transform.SetParent(parts.Root.transform, false);
-            parts.Session = sessionRoot.AddUdonSharpComponent<PocketGameTerminalSession>();
-            parts.Session.terminalPool = pool;
-            parts.Session.slotIndex = slot;
-            parts.Session.pickup = pickup;
+            parts.LocalTerminal = localTerminal;
+            if (localTerminal == null)
+            {
+                parts.Session = sessionRoot.AddUdonSharpComponent<PocketGameTerminalSession>();
+                parts.Session.terminalPool = pool;
+                parts.Session.slotIndex = slot;
+                parts.Session.pickup = pickup;
+            }
+            else
+            {
+                localTerminal.terminalRoot = parts.Root;
+                localTerminal.pickup = pickup;
+            }
             var relay = parts.Root.AddUdonSharpComponent<PocketGameInputRelay>();
             relay.terminalSession = parts.Session;
+            relay.localTerminal = localTerminal;
             parts.GameStateSlot = new GameObject("Game state").transform;
             parts.GameStateSlot.SetParent(parts.Root.transform, false);
             parts.MainCanvas = PocketGameUiBuilder.Canvas(parts.Root.transform, "Main screen", screenSize,
@@ -191,7 +220,9 @@ namespace VrcPocketGame.Editor
             parts.Ui = sessionRoot.AddUdonSharpComponent<PocketGameUi>();
             parts.Ui.mainScreen = parts.MainCanvas.gameObject;
             parts.Ui.scalableRoot = parts.Root.transform;
-            parts.Session.ui = parts.Ui;
+            if (parts.Session != null) parts.Session.ui = parts.Ui;
+            if (localTerminal != null) localTerminal.ui = parts.Ui;
+            parts.Ui.localTerminal = localTerminal;
             parts.Ui.terminalSession = parts.Session;
             return parts;
         }

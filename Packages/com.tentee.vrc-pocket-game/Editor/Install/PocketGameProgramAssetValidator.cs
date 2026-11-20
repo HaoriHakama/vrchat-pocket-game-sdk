@@ -43,7 +43,7 @@ namespace VrcPocketGame.Editor
             }
         }
 
-        public static int Validate(PocketGameTerminalPool[] pools)
+        public static int Validate(PocketGameTerminalPool[] pools, PocketGameLocalTerminal[] localTerminals = null)
         {
             var findings = new Findings();
             var behaviours = new HashSet<UdonBehaviour>();
@@ -72,6 +72,15 @@ namespace VrcPocketGame.Editor
                         }
                 }
             }
+
+            if (localTerminals != null)
+                foreach (var local in localTerminals)
+                {
+                    if (local == null) { findings.Error("Missing local terminal controller."); continue; }
+                    AddSubtree(local.gameObject, behaviours, buttons);
+                    if (local.terminalRoot != null) AddSubtree(local.terminalRoot, behaviours, buttons);
+                    if (local.gameEvents != null) gameEvents.Add(local.gameEvents);
+                }
 
             foreach (var button in buttons)
             {
