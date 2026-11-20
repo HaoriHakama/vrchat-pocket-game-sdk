@@ -2,6 +2,8 @@
 
 A game-neutral SDK for pooled personal terminals in VRChat worlds. Core supplies claim/session authority, pickup input, and common UI; the counter game is an optional sample in separate runtime and editor assemblies.
 
+An optional [local terminal mode](docs/LOCAL_TERMINALS.md) uses one scene terminal per client instead of a capacity-sized synchronized pool. Use **Install Local Counter Sample** to try it; other players cannot see its screen. The existing pooled mode remains available.
+
 ## Install and run the sample
 
 1. Use Unity **2022.3.22f1** and VRChat Worlds **3.10.5**. Import TMP Essential Resources first: **Window > TextMeshPro > Import TMP Essential Resources**.
