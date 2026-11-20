@@ -20,16 +20,25 @@ namespace VrcPocketGame.Editor
         [MenuItem("Tools/VRC Pocket Game SDK/Install Counter Sample")]
         public static void InstallIntoCurrentScene()
         {
+            Install(false);
+        }
+
+        [MenuItem("Tools/VRC Pocket Game SDK/Install Local Counter Sample")]
+        public static void InstallLocalIntoCurrentScene() { Install(true); }
+
+        private static void Install(bool local)
+        {
             PrepareProgramAssetsBatch();
             var theme = new PocketGameTheme { Font = TMP_Settings.defaultFontAsset };
             if (theme.Font == null) throw new InvalidOperationException("Import TMP Essential Resources before installing the sample.");
             var scene = SceneManager.GetActiveScene();
             if (!scene.IsValid() || !scene.isLoaded) throw new InvalidOperationException("Open a scene first.");
-            var old = GameObject.Find(RootName);
+            var rootName = local ? RootName + " Local" : RootName;
+            var old = GameObject.Find(rootName);
             var position = old != null ? old.transform.position : Selection.activeTransform != null ? Selection.activeTransform.position : new Vector3(0, 1.2f, 1.5f);
             var rotation = old != null ? old.transform.rotation : Quaternion.identity;
             if (old != null) Undo.DestroyObjectImmediate(old);
-            var root = new GameObject(RootName);
+            var root = new GameObject(rootName);
             root.transform.SetPositionAndRotation(position, rotation);
             Undo.RegisterCreatedObjectUndo(root, "Install Pocket Game");
             if (UnityEngine.Object.FindObjectOfType<EventSystem>() == null)
@@ -41,9 +50,15 @@ namespace VrcPocketGame.Editor
             kiosk.transform.SetParent(root.transform, false);
             var hit = kiosk.AddComponent<BoxCollider>();
             hit.size = new Vector3(.7f, .32f, .05f);
-            var pool = kiosk.AddUdonSharpComponent<PocketGameTerminalPool>();
-            pool.pool = kiosk.AddComponent<VRCObjectPool>();
-            var backing = UdonSharpEditorUtility.GetBackingUdonBehaviour(pool);
+            PocketGameTerminalPool pool = null;
+            PocketGameLocalTerminal localTerminal = null;
+            if (local) localTerminal = kiosk.AddUdonSharpComponent<PocketGameLocalTerminal>();
+            else
+            {
+                pool = kiosk.AddUdonSharpComponent<PocketGameTerminalPool>();
+                pool.pool = kiosk.AddComponent<VRCObjectPool>();
+            }
+            var backing = local ? UdonSharpEditorUtility.GetBackingUdonBehaviour(localTerminal) : UdonSharpEditorUtility.GetBackingUdonBehaviour(pool);
             backing.interactText = "Call / recall your game";
             backing.proximity = 2;
             var kioskCanvas = PocketGameUiBuilder.Canvas(kiosk.transform, "Kiosk screen", new Vector2(660, 280), new Vector3(0, 0, -.035f), .001f, PocketGameUi.WorldUiSortingOrder);
@@ -53,25 +68,33 @@ namespace VrcPocketGame.Editor
             PocketGameUiBuilder.Panel(kioskCanvas.transform, "Background", new Vector2(660, 280), Vector2.zero, theme.Background);
             PocketGameUiBuilder.Text(kioskCanvas.transform, "Title", "POCKET / GAME SDK", new Vector2(600, 60), new Vector2(0, 72), 30, theme);
             PocketGameUiBuilder.Text(kioskCanvas.transform, "Subtitle", "Your own game. A shared world.", new Vector2(600, 40), new Vector2(0, 14), 22, theme, true);
-            pool.statusText = PocketGameUiBuilder.Text(kioskCanvas.transform, "Status", "Use to call your terminal", new Vector2(600, 70), new Vector2(0, -65), 21, theme);
-            var storage = new GameObject("Terminal pool");
+            var statusText = PocketGameUiBuilder.Text(kioskCanvas.transform, "Status", "Use to call your terminal", new Vector2(600, 70), new Vector2(0, -65), 21, theme);
+            if (local) localTerminal.statusText = statusText;
+            else pool.statusText = statusText;
+            var storage = new GameObject(local ? "Local terminal" : "Terminal pool");
             storage.transform.SetParent(root.transform, false);
-            const int count = 2;
-            pool.terminalRoots = new GameObject[count];
-            pool.terminalSessions = new PocketGameTerminalSession[count];
-            pool.claimedPlayerIds = new int[count];
-            pool.claimGenerations = new int[count];
+            int count = local ? 1 : 2;
+            if (!local)
+            {
+                pool.terminalRoots = new GameObject[count];
+                pool.terminalSessions = new PocketGameTerminalSession[count];
+                pool.claimedPlayerIds = new int[count];
+                pool.claimGenerations = new int[count];
+            }
             for (var i = 0; i < count; i++)
             {
-                var parts = PocketGameTerminalBuilder.Create(storage.transform, "Counter terminal " + i, pool, i, theme, new Vector2(800, 520));
+                var parts = local ? PocketGameTerminalBuilder.CreateLocal(storage.transform, "Local counter terminal", localTerminal, theme, new PocketGameTerminalProfile()) : PocketGameTerminalBuilder.Create(storage.transform, "Counter terminal " + i, pool, i, theme, new Vector2(800, 520));
                 parts.Root.transform.localPosition = new Vector3(i, -4, 0);
                 BuildCounter(parts, theme);
-                pool.terminalRoots[i] = parts.Root;
-                pool.terminalSessions[i] = parts.Session;
-                pool.claimedPlayerIds[i] = -1;
+                if (!local)
+                {
+                    pool.terminalRoots[i] = parts.Root;
+                    pool.terminalSessions[i] = parts.Session;
+                    pool.claimedPlayerIds[i] = -1;
+                }
                 parts.Root.SetActive(false);
             }
-            pool.pool.Pool = pool.terminalRoots;
+            if (!local) pool.pool.Pool = pool.terminalRoots;
             PocketGameTerminalBuilder.CopyToUdon(root);
             EditorSceneManager.MarkSceneDirty(scene);
             AssetDatabase.SaveAssets();
@@ -82,22 +105,37 @@ namespace VrcPocketGame.Editor
 
         private static void BuildCounter(PocketGameTerminalParts parts, PocketGameTheme theme)
         {
-            var game = parts.GameStateSlot.gameObject.AddUdonSharpComponent<PocketCounterGame>();
+            bool local = parts.LocalTerminal != null;
+            PocketGameBehaviour game;
+            if (local) game = parts.GameStateSlot.gameObject.AddUdonSharpComponent<PocketLocalCounterGame>();
+            else game = parts.GameStateSlot.gameObject.AddUdonSharpComponent<PocketCounterGame>();
             game.terminalSession = parts.Session;
+            game.localTerminal = parts.LocalTerminal;
             game.ui = parts.Ui;
-            game.saveNamespace = "tentee.pocket.counter.v1";
-            parts.Session.gameEvents = UdonSharpEditorUtility.GetBackingUdonBehaviour(game);
-            parts.Session.ui = parts.Ui;
-            var gameEvents = parts.Session.gameEvents;
+            var gameEvents = UdonSharpEditorUtility.GetBackingUdonBehaviour(game);
+            if (local) parts.LocalTerminal.gameEvents = gameEvents;
+            else parts.Session.gameEvents = gameEvents;
             var uiEvents = UdonSharpEditorUtility.GetBackingUdonBehaviour(parts.Ui);
-            var sessionEvents = UdonSharpEditorUtility.GetBackingUdonBehaviour(parts.Session);
+            var sessionEvents = local ? UdonSharpEditorUtility.GetBackingUdonBehaviour(parts.LocalTerminal) : UdonSharpEditorUtility.GetBackingUdonBehaviour(parts.Session);
             PocketGameUiBuilder.Text(parts.HeaderSlot, "Title", "POCKET / COUNTER", new Vector2(470, 54), new Vector2(-135, 0), 27, theme);
             PocketGameUiBuilder.Button(parts.HeaderSlot, "Help", new Vector2(96, 40), new Vector2(190, 0), uiEvents, "ShowHelp", theme);
             PocketGameUiBuilder.Button(parts.HeaderSlot, "Settings", new Vector2(118, 40), new Vector2(309, 0), uiEvents, "ShowSettings", theme);
             PocketGameUiBuilder.Panel(parts.ContentSlot, "Game area", new Vector2(752, 286), Vector2.zero, theme.Panel);
             PocketGameUiBuilder.Text(parts.ContentSlot, "Caption", "A SMALL GAME / A COMPLETE TERMINAL", new Vector2(680, 34), new Vector2(0, 100), 16, theme, true, TextAlignmentOptions.Center);
-            game.countText = PocketGameUiBuilder.Text(parts.ContentSlot, "Count", "Count: 0", new Vector2(680, 92), new Vector2(0, 23), 54, theme, false, TextAlignmentOptions.Center);
-            game.ownerText = PocketGameUiBuilder.Text(parts.ContentSlot, "Owner", "Call this terminal from the kiosk", new Vector2(680, 38), new Vector2(0, -53), 19, theme, true, TextAlignmentOptions.Center);
+            var countText = PocketGameUiBuilder.Text(parts.ContentSlot, "Count", "Count: 0", new Vector2(680, 92), new Vector2(0, 23), 54, theme, false, TextAlignmentOptions.Center);
+            var ownerText = PocketGameUiBuilder.Text(parts.ContentSlot, "Owner", "Call this terminal from the kiosk", new Vector2(680, 38), new Vector2(0, -53), 19, theme, true, TextAlignmentOptions.Center);
+            if (local)
+            {
+                var counter = (PocketLocalCounterGame)game;
+                counter.countText = countText;
+                counter.ownerText = ownerText;
+            }
+            else
+            {
+                var counter = (PocketCounterGame)game;
+                counter.countText = countText;
+                counter.ownerText = ownerText;
+            }
             PocketGameUiBuilder.Text(parts.ContentSlot, "Hint", "UI button or Pickup Use to add one", new Vector2(680, 34), new Vector2(0, -103), 17, theme, true, TextAlignmentOptions.Center);
             PocketGameUiBuilder.Button(parts.ActionSlot, "On-screen drawer", new Vector2(225, 52), new Vector2(-258, 24), uiEvents, "ToggleOverlayDrawer", theme);
             PocketGameUiBuilder.Button(parts.ActionSlot, "+1", new Vector2(225, 52), new Vector2(0, 24), gameEvents, "OwnerAddOne", theme, true);
@@ -122,7 +160,7 @@ namespace VrcPocketGame.Editor
             var help = Modal(parts, "Help", theme);
             parts.Ui.helpPanel = help;
             PocketGameUiBuilder.Text(help.transform, "Title", "HOW TO PLAY", new Vector2(640, 55), new Vector2(0, 175), 29, theme);
-            PocketGameUiBuilder.Text(help.transform, "Body", "1. Call a terminal from the kiosk.\n2. Add one with +1 or Pickup Use.\n3. Open either drawer to inspect the layout.\n4. Stow from Settings to save progress.\n\nOther players can watch your count.", new Vector2(640, 280), new Vector2(0, 4), 24, theme);
+            PocketGameUiBuilder.Text(help.transform, "Body", "1. Call a terminal from the kiosk.\n2. Add one with +1 or Pickup Use.\n3. Open either drawer to inspect the layout.\n4. Stow from Settings to save progress.\n\n" + (local ? "This terminal is visible only to you." : "Other players can watch your count."), new Vector2(640, 280), new Vector2(0, 4), 24, theme);
             PocketGameUiBuilder.Button(help.transform, "Back", new Vector2(190, 46), new Vector2(0, -192), uiEvents, "ClosePanels", theme);
             var settings = Modal(parts, "Settings", theme);
             parts.Ui.settingsPanel = settings;
@@ -151,7 +189,7 @@ namespace VrcPocketGame.Editor
 
         [MenuItem("Tools/VRC Pocket Game SDK/Validate Current Scene")]
         public static void ValidateCurrentScene() { PocketGameSceneValidator.ValidateAll(); }
-        public static void PrepareProgramAssetsBatch() { PocketGameTerminalBuilder.PreparePrograms(typeof(PocketCounterGame)); }
+        public static void PrepareProgramAssetsBatch() { PocketGameTerminalBuilder.PreparePrograms(typeof(PocketCounterGame), typeof(PocketLocalCounterGame)); }
         public static void InstallAndValidateBatch()
         {
             InstallIntoCurrentScene();
