@@ -7,14 +7,18 @@ namespace VrcPocketGame
     public abstract class PocketGameBehaviour : UdonSharpBehaviour
     {
         public PocketGameTerminalSession terminalSession;
+        public PocketGameLocalTerminal localTerminal;
         public PocketGameUi ui;
 
-        protected bool CanUseGameInput() { return terminalSession != null && terminalSession.CanUseGameInput(); }
+        protected bool CanUseGameInput() { return localTerminal != null ? terminalSession == null && localTerminal.CanUseGameInput() : terminalSession != null && terminalSession.CanUseGameInput(); }
         // IsLocalClaimant already includes the session's IsCurrentSession check.
-        protected bool IsLocalClaimant() { return terminalSession != null && terminalSession.IsLocalClaimant(); }
+        protected bool IsLocalClaimant() { return localTerminal != null ? terminalSession == null && localTerminal.IsLocalClaimant() : terminalSession != null && terminalSession.IsLocalClaimant(); }
+
+        protected bool IsLocalPlayerDataRestored() { return localTerminal != null ? terminalSession == null && localTerminal.IsLocalPlayerDataRestored() : terminalSession != null && terminalSession.terminalPool != null && terminalSession.terminalPool.IsLocalPlayerDataRestored(); }
 
         public override bool OnOwnershipRequest(VRCPlayerApi requestingPlayer, VRCPlayerApi requestedOwner)
         {
+            if (localTerminal != null) return terminalSession == null;
             return terminalSession == null || terminalSession.CanPlayerOwnTerminal(requestingPlayer, requestedOwner);
         }
 
@@ -26,7 +30,9 @@ namespace VrcPocketGame
         public void PocketTerminal_RequestReturn()
         {
             if (!IsLocalClaimant()) return;
-            if (OnTerminalReturnRequested()) terminalSession.PocketTerminal_ApproveReturn();
+            if (!OnTerminalReturnRequested()) return;
+            if (localTerminal != null) localTerminal.PocketTerminal_ApproveReturn();
+            else terminalSession.PocketTerminal_ApproveReturn();
         }
         public void PocketTerminal_OnReturnStarted() { OnTerminalReturnStarted(); }
         public void PocketTerminal_OnReturnSucceeded() { OnTerminalReturnSucceeded(); }

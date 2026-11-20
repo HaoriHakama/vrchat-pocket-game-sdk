@@ -27,6 +27,7 @@ namespace VrcPocketGame
         public GameObject[] confirmPanels;
         public Transform scalableRoot;
         public PocketGameTerminalSession terminalSession;
+        public PocketGameLocalTerminal localTerminal;
         public float smallScale = .85f;
         public float largeScale = 1.15f;
 
@@ -70,7 +71,7 @@ namespace VrcPocketGame
 
         public void ShowConfirmAt(int index)
         {
-            if (_modal || (terminalSession != null && !terminalSession.CanUseGameInput())) return;
+            if (_modal || (terminalSession != null && !terminalSession.CanUseGameInput()) || (localTerminal != null && (terminalSession != null || !localTerminal.CanUseGameInput()))) return;
             GameObject panel = GetConfirmPanel(index);
             if (panel == null) return;
             ClosePanels();
@@ -121,7 +122,7 @@ namespace VrcPocketGame
 
         public void SetScale(float multiplier)
         {
-            if (_modal || scalableRoot == null || (terminalSession != null && !terminalSession.IsLocalClaimant())) return;
+            if (_modal || scalableRoot == null || (terminalSession != null && !terminalSession.IsLocalClaimant()) || (localTerminal != null && (terminalSession != null || !localTerminal.IsLocalClaimant()))) return;
             CaptureBaseScale();
             scalableRoot.localScale = _baseScale * Mathf.Clamp(multiplier, .5f, 2f);
         }
