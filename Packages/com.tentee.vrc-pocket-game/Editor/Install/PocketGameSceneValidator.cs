@@ -57,12 +57,15 @@ namespace VrcPocketGame.Editor
                 Require(root.GetComponent<Rigidbody>() != null && root.GetComponent<VRCObjectSync>() != null, "Terminal root needs Rigidbody and VRCObjectSync.");
                 Require(session.pickup != null && session.pickup.gameObject == root && session.pickup.DisallowTheft, "Pickup must be guarded on terminal root.");
                 var relay = root.GetComponent<PocketGameInputRelay>();
-                Require(relay != null && relay.terminalSession == session, "Root input/ownership relay is not wired.");
+                Require(relay != null && relay.terminalSession == session && relay.localTerminal == null, "Root input/ownership relay is not wired or mixes terminal modes.");
                 var gameProgram = session.gameEvents.programSource as UdonSharpProgramAsset;
                 Require(gameProgram != null && gameProgram.sourceCsScript != null, "Game Udon program is missing.");
                 var gameType = gameProgram.sourceCsScript.GetClass();
+                var game = UdonSharpEditorUtility.GetProxyBehaviour(session.gameEvents) as PocketGameBehaviour;
+                Require(game == null || game.localTerminal == null, "Pooled game mixes terminal modes.");
                 foreach (var name in GameEvents) Require(HasEvent(gameType, name), "Game lacks public void " + name + "().");
                 Require(session.ui != null, "Session needs the shared UI input gate.");
+                Require(session.ui.localTerminal == null, "Pooled UI mixes terminal modes.");
                 ValidateUi(root, session.ui);
             }
         }
